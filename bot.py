@@ -1,15 +1,16 @@
 import telebot
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 import pyotp
-import instaloader
+from instagrapi import Client
 import os
 import time
 from threading import Thread
 from flask import Flask
 
+# ১. সার্ভারকে জাগিয়ে রাখা
 app = Flask('')
 @app.route('/')
-def home(): return "Bot is Alive!"
+def home(): return "Bot is Running 24/7"
 def run(): app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 def keep_alive(): Thread(target=run).start()
 
@@ -24,7 +25,7 @@ def start_markup():
 
 @bot.message_handler(commands=['start'])
 def start_message(message):
-    bot.send_message(message.chat.id, "👋 **স্বাগতম!**\n\nকুকি বের করতে বাটনে ক্লিক করুন।", reply_markup=start_markup(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, "🚀 **InstaCookie Pro v2.0**\n২৪ ঘণ্টা সচল এবং দ্রুত সার্ভার।", reply_markup=start_markup(), parse_mode="Markdown")
 
 @bot.message_handler(func=lambda m: m.text == '🍪 কুকি বের করুন')
 def ask_usernames(message):
@@ -32,75 +33,64 @@ def ask_usernames(message):
     user_data[chat_id] = {}
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add(KeyboardButton('❌ বাতিল করুন'))
-    msg = bot.send_message(chat_id, "✍️ **আপনার ইউজারনেম লিস্ট দিন (নিচে নিচে):**", reply_markup=markup, parse_mode="Markdown")
+    msg = bot.send_message(chat_id, "✍️ **ইউজারনেম লিস্ট দিন:**", reply_markup=markup, parse_mode="Markdown")
     bot.register_next_step_handler(msg, ask_password)
 
 def ask_password(message):
     chat_id = message.chat.id
     if message.text == '❌ বাতিল করুন':
-        bot.send_message(chat_id, "🚫 বাতিল করা হয়েছে।", reply_markup=start_markup(), parse_mode="Markdown")
+        bot.send_message(chat_id, "🚫 বাতিল।", reply_markup=start_markup())
         return
     user_data[chat_id]['usernames'] = message.text.strip().split('\n')
-    msg = bot.send_message(chat_id, "🔑 **আপনার কমন পাসওয়ার্ডটি দিন:**", parse_mode="Markdown")
+    msg = bot.send_message(chat_id, "🔑 **পাসওয়ার্ড দিন:**")
     bot.register_next_step_handler(msg, ask_2fa)
 
 def ask_2fa(message):
     chat_id = message.chat.id
-    if message.text == '❌ বাতিল করুন':
-        bot.send_message(chat_id, "🚫 বাতিল করা হয়েছে।", reply_markup=start_markup(), parse_mode="Markdown")
-        return
     user_data[chat_id]['password'] = message.text.strip()
-    msg = bot.send_message(chat_id, "🔐 **আপনার 2FA সিক্রেট কী গুলো দিন (নিচে নিচে):**", parse_mode="Markdown")
+    msg = bot.send_message(chat_id, "🔐 **2FA সিক্রেট কী দিন:**")
     bot.register_next_step_handler(msg, process_logins)
 
 def process_logins(message):
     chat_id = message.chat.id
-    if message.text == '❌ বাতিল করুন':
-        bot.send_message(chat_id, "🚫 বাতিল করা হয়েছে।", reply_markup=start_markup(), parse_mode="Markdown")
-        return
-
     two_fa_keys = message.text.strip().split('\n')
-    usernames = user_data[chat_id].get('usernames', [])
-    password = user_data[chat_id].get('password', '')
+    usernames = user_data[chat_id]['usernames']
+    password = user_data[chat_id]['password']
     
-    bot.send_message(chat_id, "⏳ **চেকিং শুরু হয়েছে...**", reply_markup=ReplyKeyboardRemove(), parse_mode="Markdown")
+    bot.send_message(chat_id, "⏳ **সার্ভারে প্রসেসিং হচ্ছে...**", reply_markup=ReplyKeyboardRemove())
     
     success_list = []
-    report = "📊 **রিপোর্ট আপডেট:**\n\n"
     
     for i in range(len(usernames)):
         try:
-            L = instaloader.Instaloader(quiet=True)
-            u = usernames[i].strip().replace("@", "")
+            cl = Client()
+            cl.delay_range = [1, 3] # রোবট ধরা থেকে বাঁচতে ডিলে
             
-            # TOTP generation
+            u = usernames[i].strip().replace("@", "")
             secret = two_fa_keys[i].replace(" ", "").upper()
             totp = pyotp.TOTP(secret)
             otp_code = totp.now()
             
-            # Login process
-            L.login(u, password)
-            L.two_factor_login(otp_code)
+            # লগইন ট্রাই
+            cl.login(u, password, verification_code=otp_code)
             
-            cookies = L.context._session.cookies.get_dict()
-            c_str = "; ".join([f"{k}={v}" for k, v in cookies.items()])
+            # কুকি ফরম্যাট
+            cookies = cl.get_cookies()
+            c_str = f"sessionid={cookies['sessionid']}; ds_user_id={cookies['ds_user_id']}; csrftoken={cookies['csrftoken']}"
+            
             success_list.append(f"{u}|{password}|{c_str}")
-            report += f"✅ **{u}** - সফল\n"
         except Exception as e:
-            report += f"❌ **{u}** - ব্যর্থ (Login Blocked/Wrong Credentials)\n"
+            continue
             
     if success_list:
-        file_name = f"cookies_{chat_id}.txt"
-        with open(file_name, "w") as f: f.write("\n".join(success_list))
-        with open(file_name, "rb") as f: bot.send_document(chat_id, f, caption="✨ **সফল কুকি ফাইল!**", parse_mode="Markdown")
-        os.remove(file_name)
-    
-    bot.send_message(chat_id, report, reply_markup=start_markup(), parse_mode="Markdown")
+        with open(f"cookies_{chat_id}.txt", "w") as f:
+            f.write("\n".join(success_list))
+        with open(f"cookies_{chat_id}.txt", "rb") as f:
+            bot.send_document(chat_id, f, caption="✅ **কুকি রেডি!**")
+        os.remove(f"cookies_{chat_id}.txt")
+    else:
+        bot.send_message(chat_id, "❌ সব আইডিতে লগইন ব্লক হয়েছে। আইডিতে ঢুকে 'This Was Me' করুন।", reply_markup=start_markup())
 
 if __name__ == "__main__":
     keep_alive()
-    while True:
-        try:
-            bot.polling(none_stop=True, interval=0, timeout=40)
-        except Exception:
-            time.sleep(5)
+    bot.polling(none_stop=True)
