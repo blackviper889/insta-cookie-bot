@@ -1,4 +1,4 @@
 pyTelegramBotAPI
-instaloader
+instagrapi
 pyotp
 flask
